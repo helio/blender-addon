@@ -17,21 +17,25 @@
 # ##### END GPL LICENSE BLOCK #####
 
 from . import addon_updater_ops
+from . import addon
 
 bl_info = {
     "name": "Helio Cloud Rendering",
     "blender": (3, 20, 0),
-    "version": (0, 1, 0),
+    "version": (0, 1, 1),
     "category": "Render",
+    "tracker_url": "https://github.com/helio/blender-addon/issues"
 }
 
 
 def register():
     addon_updater_ops.register(bl_info)
+    addon.register()
 
 
 def unregister():
     addon_updater_ops.unregister()
+    addon.unregister()
 
 # This allows you to run the script directly from Blender's Text editor
 # to test the add-on without having to install it.

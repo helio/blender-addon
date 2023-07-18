@@ -240,9 +240,11 @@ def register():
     bpy.types.Scene.helio_progress = bpy.props.PointerProperty(type=HelioProgress)
 
     icons_dir = os.path.join(os.path.dirname(__file__), "icons")
-    if hasattr(bpy.context.space_data, "text"):
+    try:
         script_path = bpy.context.space_data.text.filepath
         icons_dir = os.path.join(os.path.dirname(script_path), "icons")
+    except (ValueError, AttributeError):
+        log.debug("not running in script mode")
 
     global custom_icons
     custom_icons = bpy.utils.previews.new()
