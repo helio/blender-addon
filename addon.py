@@ -110,11 +110,8 @@ class RenderOnHelio(bpy.types.Operator):
         return self._current_step == self._total_steps
 
     def modal(self, context, event):
-        print("modal", event.type)
         if event.type != 'TIMER':
             return {'PASS_THROUGH'}
-
-        print("timer", self._timer_count, "done?", self.done())
 
         self._timer_count += 1
         if self._timer_count == 2:
@@ -123,7 +120,6 @@ class RenderOnHelio(bpy.types.Operator):
             self.process_step(context)
 
             if self.done():
-                print("done!!!")
                 context.area.tag_redraw()
                 self.cancel(context)
 
@@ -137,8 +133,6 @@ class RenderOnHelio(bpy.types.Operator):
         return {'PASS_THROUGH'}
 
     def invoke(self, context, event):
-        print("invoke")
-
         self.update_progress(context, 0, "")
         self._steps = []
         bpy.ops.helio.render_modal('INVOKE_DEFAULT')
@@ -211,25 +205,20 @@ class ModalOperator(bpy.types.Operator):
     bl_options = {'REGISTER', 'INTERNAL'}
 
     def draw(self, context):
-        print("draw")
         helio_progress = context.scene.helio_progress
         layout = self.layout
 
         layout.prop(helio_progress, "progress")
         layout.prop(helio_progress, "progress_status")
-        print(layout.introspect())
 
     def check(self, context):
-        print("check")
         # Important for changing options
         return True
 
     def invoke(self, context, event):
-        print("invoke modal")
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
-        print("modal execute")
         return {'PASS_THROUGH'}
 
 
