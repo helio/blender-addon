@@ -16,6 +16,7 @@
 #
 # ##### END GPL LICENSE BLOCK #####
 
+import shutil
 import bpy
 import bpy.utils.previews
 import subprocess
@@ -26,7 +27,7 @@ from urllib.parse import urlencode
 from pathlib import Path
 from hashlib import sha256
 from shutil import copy2
-from . import addon_updater_ops
+from helio_blender_addon import addon_updater_ops
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO,
@@ -217,6 +218,7 @@ class RenderOnHelio(bpy.types.Operator):
         filename = Path(bpy.data.filepath).name
         directory = Path(bpy.data.filepath).parent
         helio_dir = Path(directory, "_helio")
+        shutil.rmtree(str(helio_dir), ignore_errors=True)
         helio_dir.mkdir(parents=False, exist_ok=True)
         log.debug("created directory %s", helio_dir)
 
@@ -318,7 +320,7 @@ class RenderOnHelio(bpy.types.Operator):
                             "extension": render.image_settings.file_format.lower()
                         }
                     },
-                    "render_settings": [],
+                    "render_settings": render_settings,
                 }
             ]
         }
