@@ -24,7 +24,7 @@ To run/test the addon, use `make run`.
 
 To create a new release:
 1. update the version number in `__init__.py`
-2. create a new tag (following semver).
+2. create a new release with a tag (following semver). Important: It needs to be a GitHub release, a tag alone is not enough.
 3. The GitHub action will automatically upload an appropriate release archive once the tag is there.
 
 ## Credits
