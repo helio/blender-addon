@@ -252,6 +252,8 @@ class RenderOnHelio(bpy.types.Operator):
         cycles = scene.cycles
         cycles_samples = cycles.samples
 
+        render_settings = []
+
         prefs = None
         if hasattr(context, "user_preferences"):
             prefs = context.user_preferences
@@ -270,6 +272,11 @@ class RenderOnHelio(bpy.types.Operator):
             compute_device_type = prefs.addons['cycles'].preferences.compute_device_type
             if compute_device_type == 'OPTIX':
                 engine_id += '_optix'
+
+            render_settings.append({
+                "name": "progressive_passLimit",
+                "value": cycles_samples
+            })
 
         major, minor, patch = bpy.app.version
         full_version = '.'.join(map(str, bpy.app.version))
@@ -308,7 +315,7 @@ class RenderOnHelio(bpy.types.Operator):
                             "enabled": True,
                             "final": render.frame_path(),
                             "project": render.filepath,
-                            "extension": render.image_settings.file_format
+                            "extension": render.image_settings.file_format.lower()
                         }
                     },
                     "render_settings": [],

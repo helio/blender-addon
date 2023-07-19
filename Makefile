@@ -31,13 +31,18 @@ help: ## Display this help.
 
 ##@ Development
 
+PWD=$(shell pwd)
+USER_SCRIPTS_DIR=$(PWD)/user_scripts
+
 .PHONY: run
 run: ## Runs blender with addon
-	$(BLENDER_PATH) -P ./addon.py
+	mkdir -p $(USER_SCRIPTS_DIR)/addons
+	ln -s $(PWD)/helio_blender_addon $(USER_SCRIPTS_DIR)/addons/
+	BLENDER_USER_SCRIPTS=$(USER_SCRIPTS_DIR) /snap/bin/blender --addons helio_blender_addon
+	rm -Rf $(USER_SCRIPTS_DIR)
 
 release:
 	rm helio-blender-addon-$(TAG).zip || true
-	mkdir helio-blender-addon
-	cp -R icons/ *.py *.txt *.md helio-blender-addon/
-	zip -r helio-blender-addon-$(TAG).zip helio-blender-addon/
-	rm -Rf helio-blender-addon/
+	rm -Rf helio_blender_addon/__pycache__
+	rm -Rf helio_blender_addon/*.pyc
+	zip -r helio_blender_addon-$(TAG).zip helio_blender_addon/

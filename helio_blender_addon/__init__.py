@@ -16,8 +16,13 @@
 #
 # ##### END GPL LICENSE BLOCK #####
 
-from . import addon_updater_ops
-from . import addon
+
+print("In module products __package__, __name__ ==", __package__, __name__)
+import sys
+print("In module products sys.path[0], __package__ ==", sys.path[0], __package__)
+
+from helio_blender_addon import addon_updater_ops
+from helio_blender_addon import addon
 
 bl_info = {
     "name": "Helio Cloud Rendering",
