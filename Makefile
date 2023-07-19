@@ -37,6 +37,7 @@ run: ## Runs blender with addon
 	$(BLENDER_PATH) -P ./addon.py
 
 release:
+	rm helio-blender-addon-$(TAG).zip || true
 	mkdir helio-blender-addon-$(ESCAPED_TAG)
 	cp -R icons/ *.py *.txt *.md helio-blender-addon-$(ESCAPED_TAG)/
 	zip -r helio-blender-addon-$(TAG).zip helio-blender-addon-$(ESCAPED_TAG)/

@@ -20,16 +20,78 @@ import bpy
 import bpy.utils.previews
 import subprocess
 import os
+import json
 import logging
 from urllib.parse import urlencode
 from pathlib import Path
 from hashlib import sha256
 from shutil import copy2
+from . import addon_updater_ops
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO,
                     format='%(levelname)8s %(message)s')
 log.setLevel(logging.DEBUG)
+
+
+@addon_updater_ops.make_annotations
+class Preferences(bpy.types.AddonPreferences):
+    bl_idname = __package__
+
+    client_target_release = bpy.props.EnumProperty(
+        name="Client release to use",
+        description="Determines which client release to use. Must have the respective client installed",
+        items=[('STABLE', 'Stable', ''), ('BETA', 'Beta', ''), ('ALPHA', 'Alpha', '')],
+        default="STABLE"
+    )
+
+    # Addon updater preferences.
+    auto_check_update = bpy.props.BoolProperty(
+        name="Auto-check for Update",
+        description="If enabled, auto-check for updates using an interval",
+        default=True)
+
+    updater_interval_months = bpy.props.IntProperty(
+        name='Months',
+        description="Number of months between checking for updates",
+        default=0,
+        min=0)
+
+    updater_interval_days = bpy.props.IntProperty(
+        name='Days',
+        description="Number of days between checking for updates",
+        default=7,
+        min=0,
+        max=31)
+
+    updater_interval_hours = bpy.props.IntProperty(
+        name='Hours',
+        description="Number of hours between checking for updates",
+        default=0,
+        min=0,
+        max=23)
+
+    updater_interval_minutes = bpy.props.IntProperty(
+        name='Minutes',
+        description="Number of minutes between checking for updates",
+        default=0,
+        min=0,
+        max=59)
+
+    def draw(self, context):
+        layout = self.layout
+
+        box = layout.box()
+        box.label(text="Helio Settings")
+        row = box.row()
+        row.prop(self, "client_target_release")
+
+        # Works best if a column, or even just self.layout.
+        mainrow = layout.row()
+        col = mainrow.column()
+
+        # Updater draw function, could also pass in col as third arg.
+        addon_updater_ops.update_settings_ui(self, context)
 
 
 class HelioProgress(bpy.types.PropertyGroup):
@@ -96,7 +158,14 @@ class RenderOnHelio(bpy.types.Operator):
             bpy.ops.wm.save_as_mainfile(filepath=param, copy=True, relative_remap=True)
             progress_message = "Saved exported file"
         elif action == 'open_client':
-            # subprocess.run(["open", "helio-render://render.helio.exchange/projects/new?"+param])
+            protocol = "helio-render"
+            prefs = addon_updater_ops.get_user_preferences(context)
+            release = prefs.client_target_release
+            if release == "BETA":
+                protocol += "-beta"
+            elif release == "ALPHA":
+                protocol += "-alpha"
+            subprocess.run(["open", f"{protocol}://scene-manager.pulze.io/projects/upsert?"+param])
             log.info("opening client")
             progress_message = "Opened Helio Client"
         else:
@@ -148,7 +217,9 @@ class RenderOnHelio(bpy.types.Operator):
         helio_dir.mkdir(parents=False, exist_ok=True)
         log.debug("created directory %s", helio_dir)
 
-        project_file = str(helio_dir.joinpath(filename))
+        project_path = str(helio_dir)
+        project_name = filename
+        project_filepath = str(helio_dir.joinpath(project_name))
 
         paths = bpy.utils.blend_paths(absolute=True, packed=True, local=False)
         log.debug("all paths: %s", paths)
@@ -156,8 +227,8 @@ class RenderOnHelio(bpy.types.Operator):
         for path in paths:
             self._steps.append(('copy', path))
 
-        self._steps.append(('relink', str(helio_dir)))
-        self._steps.append(('resave', project_file))
+        self._steps.append(('relink', project_path))
+        self._steps.append(('resave', project_filepath))
 
         # https://docs.blender.org/api/current/bpy.types.Scene.html#bpy.types.Scene
         scene = context.scene
@@ -166,6 +237,10 @@ class RenderOnHelio(bpy.types.Operator):
 
         # https://docs.blender.org/api/current/bpy.types.RenderSettings.html#bpy.types.RenderSettings
         render = scene.render
+        engine = render.engine
+
+        frame_start = scene.frame_start
+        frame_end = scene.frame_end
 
         resolution_x = render.resolution_x
         resolution_y = render.resolution_y
@@ -174,13 +249,73 @@ class RenderOnHelio(bpy.types.Operator):
         cycles = scene.cycles
         cycles_samples = cycles.samples
 
+        prefs = None
+        if hasattr(context, "user_preferences"):
+            prefs = context.user_preferences
+        elif hasattr(context, "preferences"):
+            prefs = context.preferences
+
+        engine_id = "cycles"
+        if engine == 'BLENDER_EEVEE':
+            if bpy.app.version < (3, 6, 0):
+                raise NotImplementedError("EEVEE support is limited to blender versions >= 3.6.0")
+            engine_id = 'eevee_gpu_optix' # eevee only this is possible
+        else:
+            device = cycles.device
+            if device == 'GPU':
+                engine_id += '_gpu'
+            compute_device_type = prefs.addons['cycles'].preferences.compute_device_type
+            if compute_device_type == 'OPTIX':
+                engine_id += '_optix'
+
+        major, minor, patch = bpy.app.version
+        full_version = f"{major}.{minor}.{patch}"
+        data = {
+            "version": "1.0.0",
+            "catalog": {
+                "tool": {
+                    "id": f"blender_{major}_{minor}",
+                    "version": full_version
+                },
+                "engine": {
+                    "id": engine_id,
+                    "version": full_version
+                },
+                "plugins": []
+            },
+            "project_path": project_path,
+            "project_name": project_name,
+            "scenes": [
+                {
+                    "id": 1,
+                    "scene_id": scene.name,
+                    "scene_name": scene.name,
+                    "enabled": True,
+                    "camera": camera,
+                    "resolution": {
+                        "width": resolution_x,
+                        "height": resolution_y,
+                        "ration": 1
+                    },
+                    "frames": f"{frame_start}-{frame_end}",
+                    "output": {
+                        "common": {
+                            "enabled": True,
+                            "final": render.frame_path(),
+                            "project": render.filepath,
+                            "extension": render.image_settings.file_format
+                        }
+                    },
+                    "render_settings": [],
+                }
+            ]
+        }
+        data_filename = project_filepath.replace('.blend', '.json')
+        with open(str(helio_dir.joinpath(data_filename)), 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
         qs = urlencode({
-            "frames": "",
-            "camera": camera,
-            "width": resolution_x,
-            "height": resolution_y,
-            "samples": cycles_samples,
-            "file": project_file,
+            "path": project_filepath,
         })
 
         self._steps.append(('open_client', qs))
@@ -227,7 +362,7 @@ def menu_func(self, context):
     self.layout.operator(RenderOnHelio.bl_idname, icon_value=custom_icons["helio_icon"].icon_id)
 
 
-classes = [RenderOnHelio, HelioProgress, ModalOperator]
+classes = [Preferences, RenderOnHelio, HelioProgress, ModalOperator]
 
 custom_icons = None
 
