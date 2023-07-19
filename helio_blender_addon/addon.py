@@ -19,7 +19,6 @@
 import shutil
 import bpy
 import bpy.utils.previews
-import subprocess
 import os
 import json
 import logging
@@ -169,7 +168,7 @@ class RenderOnHelio(bpy.types.Operator):
                 protocol += "-beta"
             elif release == "ALPHA":
                 protocol += "-alpha"
-            subprocess.run(["open", f"{protocol}://scene-manager.pulze.io/projects/upsert?"+param])
+            os.startfile(f"{protocol}://scene-manager.pulze.io/projects/upsert?"+param)
             log.info("opening client")
             progress_message = "Opened Helio Client"
         else:

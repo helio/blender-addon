@@ -1,3 +1,4 @@
 *.zip
 __pycache__
 helio_blender_addon/helio_blender_addon_updater/
+user_scripts/

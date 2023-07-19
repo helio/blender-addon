@@ -36,9 +36,10 @@ USER_SCRIPTS_DIR=$(PWD)/user_scripts
 
 .PHONY: run
 run: ## Runs blender with addon
+	rm -Rf  $(USER_SCRIPTS_DIR) || true
 	mkdir -p $(USER_SCRIPTS_DIR)/addons
 	ln -s $(PWD)/helio_blender_addon $(USER_SCRIPTS_DIR)/addons/
-	BLENDER_USER_SCRIPTS=$(USER_SCRIPTS_DIR) ADDON_DEBUG=true /snap/bin/blender --addons helio_blender_addon
+	BLENDER_USER_SCRIPTS=$(USER_SCRIPTS_DIR) ADDON_DEBUG=true $(BLENDER_PATH) --addons helio_blender_addon
 	rm -Rf $(USER_SCRIPTS_DIR)
 
 release:
