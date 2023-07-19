@@ -269,9 +269,10 @@ class RenderOnHelio(bpy.types.Operator):
                 engine_id += '_optix'
 
         major, minor, patch = bpy.app.version
-        full_version = f"{major}.{minor}.{patch}"
+        full_version = '.'.join(map(str, bpy.app.version))
         data = {
             "version": "1.0.0",
+            "addon_version": '.'.join(map(str, addon_updater_ops.updater.current_version)),
             "catalog": {
                 "tool": {
                     "id": f"blender_{major}_{minor}",
@@ -290,6 +291,7 @@ class RenderOnHelio(bpy.types.Operator):
                     "id": 1,
                     "scene_id": scene.name,
                     "scene_name": scene.name,
+                    "color": "#250E37",
                     "enabled": True,
                     "camera": camera,
                     "resolution": {
