@@ -20,6 +20,8 @@ import shutil
 import bpy
 import bpy.utils.previews
 import os
+import sys
+import subprocess
 import json
 import logging
 from urllib.parse import urlencode
@@ -35,6 +37,18 @@ if os.getenv("ADDON_DEBUG"):
     log.setLevel(logging.DEBUG)
     log.debug("debug log enabled")
     addon_updater_ops.updater.verbose = True
+
+
+def startfile(path):
+    """
+    Cross-platform start file for opening helio client.
+    """
+    if sys.platform=='win32':
+        os.startfile(path)
+    elif sys.platform=='darwin':
+        subprocess.run(["open", path])
+    else:
+        subprocess.run(["xdg-open", path])
 
 
 @addon_updater_ops.make_annotations
@@ -159,6 +173,10 @@ class RenderOnHelio(bpy.types.Operator):
             progress_message = "Relinked files"
         elif action == 'resave':
             bpy.ops.wm.save_as_mainfile(filepath=param, copy=True, relative_remap=True)
+
+            # undo the changes - a bit ugly but it works.
+            bpy.ops.ed.undo_push()
+            bpy.ops.ed.undo()
             progress_message = "Saved exported file"
         elif action == 'open_client':
             protocol = "helio-render"
@@ -168,7 +186,7 @@ class RenderOnHelio(bpy.types.Operator):
                 protocol += "-beta"
             elif release == "ALPHA":
                 protocol += "-alpha"
-            os.startfile(f"{protocol}://scene-manager.pulze.io/projects/upsert?"+param)
+            startfile(f"{protocol}://scene-manager.pulze.io/projects/upsert?"+param)
             log.info("opening client")
             progress_message = "Opened Helio Client"
         else:
@@ -372,6 +390,7 @@ class ModalOperator(bpy.types.Operator):
 
 def menu_func(self, context):
     global custom_icons
+    self.layout.separator()
     self.layout.operator(RenderOnHelio.bl_idname, icon_value=custom_icons["helio_icon"].icon_id)
 
 
