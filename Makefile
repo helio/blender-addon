@@ -1,6 +1,5 @@
 # TAG reads git short SHA hash to be used as a version identifier
 TAG?=$(shell git rev-parse --short=8 HEAD)
-ESCAPED_TAG=$(subst .,_,$(TAG))
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # This is a requirement for 'setup-envtest.sh' in the test target.
@@ -38,7 +37,7 @@ run: ## Runs blender with addon
 
 release:
 	rm helio-blender-addon-$(TAG).zip || true
-	mkdir helio-blender-addon-$(ESCAPED_TAG)
-	cp -R icons/ *.py *.txt *.md helio-blender-addon-$(ESCAPED_TAG)/
-	zip -r helio-blender-addon-$(TAG).zip helio-blender-addon-$(ESCAPED_TAG)/
-	rm -Rf helio-blender-addon-$(ESCAPED_TAG)/
+	mkdir helio-blender-addon
+	cp -R icons/ *.py *.txt *.md helio-blender-addon/
+	zip -r helio-blender-addon-$(TAG).zip helio-blender-addon/
+	rm -Rf helio-blender-addon/

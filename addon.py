@@ -31,7 +31,10 @@ from . import addon_updater_ops
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO,
                     format='%(levelname)8s %(message)s')
-log.setLevel(logging.DEBUG)
+if os.getenv("ADDON_DEBUG"):
+    log.setLevel(logging.DEBUG)
+    log.debug("debug log enabled")
+    addon_updater_ops.updater.verbose = True
 
 
 @addon_updater_ops.make_annotations
