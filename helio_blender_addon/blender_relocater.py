@@ -35,7 +35,11 @@ log.debug("all paths: %s", paths)
 
 helio_dir = os.getenv('HELIO_DIR')
 
-directory = Path(bpy.data.filepath).parent
+log.debug("starting missing files: %s", helio_dir)
+
 bpy.ops.file.find_missing_files(find_all=True, directory=helio_dir)
+
+log.debug("stopped missing files")
+
 bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, relative_remap=True, compress=True)
 bpy.ops.wm.quit_blender()

@@ -183,8 +183,14 @@ class RenderOnHelio(bpy.types.Operator):
             new_dir = Path(helio_dir, sha256(str(directory).encode("utf-8")).hexdigest())
             subprocess.run([bpy.app.binary_path, '-b', '-P', os.path.join(os.path.dirname(__file__), "blend_relocater.py", new_dir.joinpath(name))], env={'HELIO_DIR': helio_dir})
             progress_message = f"Relinked {Path(param).name}"
+        elif action == 'pack_libraries':
+            bpy.ops.file.pack_libraries()
+            progress_message = "Packed libraries"
         elif action == 'relink':
             bpy.ops.file.find_missing_files(find_all=True, directory=param)
+            for subdir in Path(param).iterdir():
+                if subdir.is_dir():
+                    bpy.ops.file.find_missing_files(find_all=True, directory=str(subdir))
             progress_message = "Relinked files"
         elif action == 'resave':
             bpy.ops.wm.save_as_mainfile(filepath=param, copy=True, relative_remap=True, compress=True)
@@ -281,16 +287,17 @@ class RenderOnHelio(bpy.types.Operator):
                 tp = Path(path)
                 for p in tp.parent.glob(tp.name.replace('<UDIM>', '*')):
                     self._steps.append(('copy', str(p)))
-            elif '.blend' in path:
-                self._steps.append(('copy', path))
-                blend_files.append(path)
+            # elif '.blend' in path:
+            #     self._steps.append(('copy', path))
+            #     blend_files.append(path)
             else:
                 self._steps.append(('copy', path))
 
+        self._steps.append(('pack_libraries', project_path))
         self._steps.append(('relink', project_path))
 
-        for blend_files in paths:
-            self._steps.append(('relink_blend', blend_files))
+        # for blend_files in paths:
+        #     self._steps.append(('relink_blend', blend_files))
 
         self._steps.append(('resave', project_filepath))
 
