@@ -268,7 +268,13 @@ class RenderOnHelio(bpy.types.Operator):
         log.debug("all paths: %s", paths)
 
         for path in paths:
-            self._steps.append(('copy', path))
+            if '<UDIM>' in path:
+                print(path, Path(path).parent)
+                tp = Path(path)
+                for p in tp.parent.glob(tp.name.replace('<UDIM>', '*')):
+                    self._steps.append(('copy', str(p)))
+            else:
+                self._steps.append(('copy', path))
 
         self._steps.append(('relink', project_path))
         self._steps.append(('resave', project_filepath))

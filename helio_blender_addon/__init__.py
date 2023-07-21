@@ -22,7 +22,7 @@ from helio_blender_addon import addon
 bl_info = {
     "name": "Helio Cloud Rendering",
     "blender": (3, 20, 0),
-    "version": (0, 1, 14),
+    "version": (0, 1, 15),
     "category": "Render",
     "tracker_url": "https://github.com/helio/blender-addon/issues"
 }
