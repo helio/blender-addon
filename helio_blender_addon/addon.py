@@ -16,7 +16,6 @@
 #
 # ##### END GPL LICENSE BLOCK #####
 
-import shutil
 import bpy
 import bpy.utils.previews
 import os
@@ -27,7 +26,8 @@ import logging
 from urllib.parse import urlencode
 from pathlib import Path
 from hashlib import sha256
-from shutil import copy2
+from distutils.file_util import copy_file
+from distutils.errors import DistutilsFileError
 from helio_blender_addon import addon_updater_ops
 
 log = logging.getLogger(__name__)
@@ -136,6 +136,7 @@ class RenderOnHelio(bpy.types.Operator):
     _total_steps = None
     _timer = None
     _timer_count = 0
+    _log = None
 
     def update_progress(self, context, value, status):
         log.debug("update progress %d %s", value, status)
@@ -154,7 +155,7 @@ class RenderOnHelio(bpy.types.Operator):
         helio_dir = self.target_dir(context)
 
         action, param = self._steps[self._current_step]
-        log.debug("current step %d (%s, %s", self._current_step, action, param)
+        log.debug("current step %d (%s, %s)", self._current_step, action, param)
         progress_message = ""
         if action == 'copy':
             path = param
@@ -163,20 +164,30 @@ class RenderOnHelio(bpy.types.Operator):
             new_dir = Path(helio_dir, sha256(str(directory).encode("utf-8")).hexdigest())
             new_dir.mkdir(parents=False, exist_ok=True)
             try:
-                copy2(path, str(new_dir))
+                dest, copied = copy_file(path, str(new_dir), update=True)
                 progress_message = f"Copied {name}"
-            except FileNotFoundError:
-                log.error("file not found: %s", path)
+                if copied:
+                    self._log.info("copied %s to %s", path, dest)
+                else:
+                    self._log.info("did not copy, not newer: %s", path)
+
+            except DistutilsFileError as e:
+                log.error("error copying: %s (%s)", path, str(e))
+                self._log.error("error copying: %s (%s)", path, str(e))
+                self.report({'ERROR'}, f"file {name} not found")
                 progress_message = f"File {name} not found"
         elif action == 'relink':
             bpy.ops.file.find_missing_files(find_all=True, directory=param)
             progress_message = "Relinked files"
         elif action == 'resave':
-            bpy.ops.wm.save_as_mainfile(filepath=param, copy=True, relative_remap=True)
+            bpy.ops.wm.save_as_mainfile(filepath=param, copy=True, relative_remap=True, compress=True)
 
-            # undo the changes - a bit ugly but it works.
-            bpy.ops.ed.undo_push()
-            bpy.ops.ed.undo()
+            # remove .blend1 files
+            for p in Path(param).parent.glob("*.blend1"):
+                log.debug("unlinking %s", str(p))
+                p.unlink()
+
+            # save current file again
             progress_message = "Saved exported file"
         elif action == 'open_client':
             protocol = "helio-render"
@@ -186,9 +197,11 @@ class RenderOnHelio(bpy.types.Operator):
                 protocol += "-beta"
             elif release == "ALPHA":
                 protocol += "-alpha"
-            startfile(f"{protocol}://scene-manager.pulze.io/projects/upsert?"+param)
+            url = f"{protocol}://scene-manager.pulze.io/projects/upsert?{param}"
+            startfile(url)
             log.info("opening client")
-            progress_message = "Opened Helio Client"
+            self._log.info("opened client: %s", url)
+            progress_message = "Opening Helio Client, please wait"
         else:
             raise NotImplementedError(f"Not implemented step: ({action}, {param})")
 
@@ -213,11 +226,7 @@ class RenderOnHelio(bpy.types.Operator):
                 context.area.tag_redraw()
                 self.cancel(context)
 
-                if not bpy.data.is_saved:
-                    log.info("file not saved, executing undo.")
-                    bpy.ops.ed.undo()
-                else:
-                    log.info("file is saved, doing nothing")
+                bpy.ops.wm.revert_mainfile()
                 return {'FINISHED'}
 
         return {'PASS_THROUGH'}
@@ -235,13 +244,24 @@ class RenderOnHelio(bpy.types.Operator):
         filename = Path(bpy.data.filepath).name
         directory = Path(bpy.data.filepath).parent
         helio_dir = Path(directory, "_helio")
-        shutil.rmtree(str(helio_dir), ignore_errors=True)
-        helio_dir.mkdir(parents=False, exist_ok=True)
-        log.debug("created directory %s", helio_dir)
-
         project_path = str(helio_dir)
         project_name = filename
         project_filepath = str(helio_dir.joinpath(project_name))
+
+        self._log = logging.getLogger(filename)
+        self._log.setLevel(log.getEffectiveLevel())
+        log_file = project_filepath.replace('.blend', '.log')
+        try:
+            Path(log_file).unlink()
+        except Exception:
+            pass
+        fh = logging.FileHandler(log_file)
+        fh.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        self._log.addHandler(fh)
+        self._log.info("start new sync")
+
+        helio_dir.mkdir(parents=False, exist_ok=True)
+        log.debug("created directory %s", helio_dir)
 
         paths = bpy.utils.blend_paths(absolute=True, packed=True, local=False)
         log.debug("all paths: %s", paths)
