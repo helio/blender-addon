@@ -248,6 +248,8 @@ class RenderOnHelio(bpy.types.Operator):
         project_name = filename
         project_filepath = str(helio_dir.joinpath(project_name))
 
+        helio_dir.mkdir(parents=False, exist_ok=True)
+
         self._log = logging.getLogger(filename)
         self._log.setLevel(log.getEffectiveLevel())
         log_file = project_filepath.replace('.blend', '.log')
@@ -260,7 +262,6 @@ class RenderOnHelio(bpy.types.Operator):
         self._log.addHandler(fh)
         self._log.info("start new sync")
 
-        helio_dir.mkdir(parents=False, exist_ok=True)
         log.debug("created directory %s", helio_dir)
 
         paths = bpy.utils.blend_paths(absolute=True, packed=True, local=False)
