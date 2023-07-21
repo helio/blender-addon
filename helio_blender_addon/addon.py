@@ -176,6 +176,13 @@ class RenderOnHelio(bpy.types.Operator):
                 self._log.error("error copying: %s (%s)", path, str(e))
                 self.report({'ERROR'}, f"file {name} not found")
                 progress_message = f"File {name} not found"
+        elif action == 'relink_blend':
+            path = param
+            name = Path(path).name
+            directory = Path(path).parent
+            new_dir = Path(helio_dir, sha256(str(directory).encode("utf-8")).hexdigest())
+            subprocess.run([bpy.app.binary_path, '-b', '-P', os.path.join(os.path.dirname(__file__), "blend_relocater.py", new_dir.joinpath(name))], env={'HELIO_DIR': helio_dir})
+            progress_message = f"Relinked {Path(param).name}"
         elif action == 'relink':
             bpy.ops.file.find_missing_files(find_all=True, directory=param)
             progress_message = "Relinked files"
@@ -267,16 +274,24 @@ class RenderOnHelio(bpy.types.Operator):
         paths = bpy.utils.blend_paths(absolute=True, packed=True, local=False)
         log.debug("all paths: %s", paths)
 
+        blend_files = []
+
         for path in paths:
             if '<UDIM>' in path:
-                print(path, Path(path).parent)
                 tp = Path(path)
                 for p in tp.parent.glob(tp.name.replace('<UDIM>', '*')):
                     self._steps.append(('copy', str(p)))
+            elif '.blend' in path:
+                self._steps.append(('copy', path))
+                blend_files.append(path)
             else:
                 self._steps.append(('copy', path))
 
         self._steps.append(('relink', project_path))
+
+        for blend_files in paths:
+            self._steps.append(('relink_blend', blend_files))
+
         self._steps.append(('resave', project_filepath))
 
         # https://docs.blender.org/api/current/bpy.types.Scene.html#bpy.types.Scene
