@@ -9,6 +9,8 @@
 
 There's now a new `Render on Helio` menu item in the `Render` menu which you can use to collect assets and send them to the Helio client.
 
+![example showing Render On Helio menu item](example.png)
+
 ## Development
 
 Set up your local IDE/Editor to use the python interpreter installed with Blender.
