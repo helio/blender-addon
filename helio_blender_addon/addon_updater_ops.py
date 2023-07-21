@@ -1298,7 +1298,7 @@ def select_link_function(self, tag):
     link = tag["zipball_url"]
 
     # -- Example: select the first (or only) asset instead source code --
-    if "assets" in tag and "browser_download_url" in tag["assets"][0]:
+    if "assets" in tag and len(tag["assets"]) > 0 and "browser_download_url" in tag["assets"][0]:
         link = tag["assets"][0]["browser_download_url"]
 
     # -- Example: select asset based on OS, where multiple builds exist --
