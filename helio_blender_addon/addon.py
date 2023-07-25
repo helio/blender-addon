@@ -15,7 +15,7 @@
 #  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #
 # ##### END GPL LICENSE BLOCK #####
-
+import blender_asset_tracer.pack.transfer
 import bpy
 import bpy.utils.previews
 import os
@@ -24,11 +24,15 @@ import subprocess
 import json
 import logging
 from urllib.parse import urlencode
-from pathlib import Path
+from pathlib import Path, PurePath
 from hashlib import sha256
 from distutils.file_util import copy_file
 from distutils.errors import DistutilsFileError
+
+import typing
+
 from helio_blender_addon import addon_updater_ops
+from helio_blender_addon import dependencies
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO,
@@ -43,9 +47,9 @@ def startfile(path):
     """
     Cross-platform start file for opening helio client.
     """
-    if sys.platform=='win32':
+    if sys.platform == 'win32':
         os.startfile(path)
-    elif sys.platform=='darwin':
+    elif sys.platform == 'darwin':
         subprocess.run(["open", path])
     else:
         subprocess.run(["xdg-open", path])
@@ -121,19 +125,21 @@ class HelioProgress(bpy.types.PropertyGroup):
     def get_progress_status(self):
         return self.status_value
 
-    progress: bpy.props.FloatProperty( name="Progress", subtype="PERCENTAGE", soft_min=0, soft_max=100, precision=1, get=get_progress)
+    progress: bpy.props.FloatProperty(name="Progress", subtype="PERCENTAGE", soft_min=0, soft_max=100, precision=1,
+                                      get=get_progress)
     progress_status: bpy.props.StringProperty(name="Status", get=get_progress_status)
 
 
 class RenderOnHelio(bpy.types.Operator):
-    """Render on Helio"""      # Use this as a tooltip for menu items and buttons.
-    bl_idname = "helio.render"        # Unique identifier for buttons and menu items to reference.
-    bl_label = "Render On Helio"         # Display name in the interface.
+    """Render on Helio"""  # Use this as a tooltip for menu items and buttons.
+    bl_idname = "helio.render"  # Unique identifier for buttons and menu items to reference.
+    bl_label = "Render On Helio"  # Display name in the interface.
     bl_options = {'REGISTER', 'UNDO'}  # Enable undo for the operator.
 
     _steps = []
     _current_step = None
     _total_steps = None
+    _total = 0
     _timer = None
     _timer_count = 0
     _log = None
@@ -157,38 +163,35 @@ class RenderOnHelio(bpy.types.Operator):
         action, param = self._steps[self._current_step]
         log.debug("current step %d (%s, %s)", self._current_step, action, param)
         progress_message = ""
-        if action == 'copy':
-            path = param
-            name = Path(path).name
-            directory = Path(path).parent
-            new_dir = Path(helio_dir, sha256(str(directory).encode("utf-8")).hexdigest())
-            new_dir.mkdir(parents=False, exist_ok=True)
+        if action == 'packer':
+            filename = Path(param).name
+            directory = Path(param).parent
+
+            from blender_asset_tracer import pack
+
+            self._total = 0
+
+            class ProgressCallback(pack.progress.Callback):
+                def trace_asset(pself, filename: Path) -> None:
+                    self._total += 1
+
+                def trace_blendfile(pself, filename: Path) -> None:
+                    self.update_progress(context, self._current_step / self._total_steps * 100, f"Copied {filename}")
+
+                def transfer_file(pself, src: Path, dst: Path) -> None:
+                    self.update_progress(context, self._current_step / self._total_steps * 100, f"Copying {src}")
+
+                def pack_done(pself, output_blendfile: PurePath, missing_files: typing.Set[Path]):
+                    self.update_progress(context, 100.0, f"Packing done")
+
+            packer = pack.Packer(bpy.data.filepath, directory, str(helio_dir), compress=True)
+            packer.progress_cb = ProgressCallback()
+            packer.strategise()
             try:
-                dest, copied = copy_file(path, str(new_dir), update=True)
-                progress_message = f"Copied {name}"
-                if copied:
-                    self._log.info("copied %s to %s", path, dest)
-                else:
-                    self._log.info("did not copy, not newer: %s", path)
-
-            except DistutilsFileError as e:
-                log.error("error copying: %s (%s)", path, str(e))
-                self._log.error("error copying: %s (%s)", path, str(e))
-                self.report({'ERROR'}, f"file {name} not found")
-                progress_message = f"File {name} not found"
-        elif action == 'relink':
-            bpy.ops.file.find_missing_files(find_all=True, directory=param)
-            progress_message = "Relinked files"
-        elif action == 'resave':
-            bpy.ops.wm.save_as_mainfile(filepath=param, copy=True, relative_remap=True, compress=True)
-
-            # remove .blend1 files
-            for p in Path(param).parent.glob("*.blend1"):
-                log.debug("unlinking %s", str(p))
-                p.unlink()
-
-            # save current file again
-            progress_message = "Saved exported file"
+                packer.execute()
+            except blender_asset_tracer.pack.transfer.FileTransferError as ex:
+                self._log.info(f"{len(ex.files_remaining)} files couldn't be copied, starting with {ex.files_remaining[0]}")
+                raise ex
         elif action == 'open_client':
             protocol = "helio-render"
             prefs = addon_updater_ops.get_user_preferences(context)
@@ -206,7 +209,7 @@ class RenderOnHelio(bpy.types.Operator):
             raise NotImplementedError(f"Not implemented step: ({action}, {param})")
 
         self._current_step += 1
-        self.update_progress(context, self._current_step/self._total_steps*100, progress_message)
+        self.update_progress(context, self._current_step / self._total_steps * 100, progress_message)
         context.area.tag_redraw()
 
     def done(self):
@@ -264,20 +267,7 @@ class RenderOnHelio(bpy.types.Operator):
 
         log.debug("created directory %s", helio_dir)
 
-        paths = bpy.utils.blend_paths(absolute=True, packed=True, local=False)
-        log.debug("all paths: %s", paths)
-
-        for path in paths:
-            if '<UDIM>' in path:
-                print(path, Path(path).parent)
-                tp = Path(path)
-                for p in tp.parent.glob(tp.name.replace('<UDIM>', '*')):
-                    self._steps.append(('copy', str(p)))
-            else:
-                self._steps.append(('copy', path))
-
-        self._steps.append(('relink', project_path))
-        self._steps.append(('resave', project_filepath))
+        self._steps.append(('packer', bpy.data.filepath))
 
         # https://docs.blender.org/api/current/bpy.types.Scene.html#bpy.types.Scene
         scene = context.scene
@@ -310,7 +300,7 @@ class RenderOnHelio(bpy.types.Operator):
         if engine == 'BLENDER_EEVEE':
             if bpy.app.version < (3, 6, 0):
                 raise NotImplementedError("EEVEE support is limited to blender versions >= 3.6.0")
-            engine_id = 'eevee_gpu_optix' # eevee only this is possible
+            engine_id = 'eevee_gpu_optix'  # eevee only this is possible
         else:
             device = cycles.device
             if device == 'GPU':
@@ -427,6 +417,8 @@ custom_icons = None
 
 
 def register():
+    dependencies.install()
+
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.types.TOPBAR_MT_render.append(menu_func)  # Adds the new operator to an existing menu.
