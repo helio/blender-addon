@@ -36,13 +36,14 @@ if os.getenv("ADDON_DEBUG"):
     log.debug("debug log enabled")
 
 
-def relocate_files(all_paths, target_parent_dir, objects):
+def relocate_files(all_paths, target_parent_dir, source_dir, objects):
     for obj in objects:
         if obj.filepath == "":
             yield obj.filepath, "empty filepath", False
             return
 
-        path = Path(bpy.path.abspath(obj.filepath, library=obj.library))
+        path = Path(bpy.path.abspath(obj.filepath, start=source_dir, library=obj.library)).resolve()
+        log.debug(f"path filepath:{obj.filepath} start={source_dir} library={obj.library} => {bpy.path.abspath(obj.filepath, start=source_dir, library=obj.library)}")
 
         directory = path.parent
         target_dir = target_parent_dir.joinpath(sha256(str(directory).encode("utf-8")).hexdigest())
@@ -59,9 +60,9 @@ def relocate_files(all_paths, target_parent_dir, objects):
                 try:
                     dest, copied = copy_file(str(p), str(target_dir), update=True)
                     yield str(p), dest, copied
+                    obj.filepath = str(target_dir.joinpath(path.name))
                 except DistutilsFileError as e:
                     yield str(p), e, False
-            obj.filepath = str(target_dir.joinpath(path.name))
         else:
             try:
                 dest, copied = copy_file(str(path), str(target_dir), update=True)
@@ -77,7 +78,11 @@ def load_post(filepath):
 
     path = Path(filepath)
     directory = path.parent
+    source_dir = directory
+    if os.getenv("SOURCE_DIR"):
+        source_dir = os.getenv("SOURCE_DIR")
     helio_dir = Path(directory, "_helio")
+    helio_dir.mkdir(parents=False, exist_ok=True)
     if os.getenv("HELIO_DIR"):
         # log_file = Path(os.getenv("HELIO_DIR")).joinpath(bpy.data.filepath.replace('.blend', '.log'))
         # try:
@@ -94,10 +99,23 @@ def load_post(filepath):
     filename = path.name
     project_name = filename
     project_filepath = str(helio_dir.joinpath(project_name))
-    helio_dir.mkdir(parents=False, exist_ok=True)
+    if os.getenv("TARGET_DIR"):
+        project_filepath = str(Path(os.getenv("TARGET_DIR")).joinpath(project_name))
 
     all_paths = set(bpy.utils.blend_paths(absolute=True, packed=True, local=False))
     print('<<<< all paths', bpy.utils.blend_paths(absolute=True, packed=True, local=False))
+
+    if os.getenv("SKIP_LIBRARIES") != "true":
+        for lib in bpy.data.libraries:
+            path = bpy.path.abspath(lib.filepath, library=lib.library)
+            directory = Path(path).parent
+            target_dir = helio_dir.joinpath(sha256(str(directory).encode("utf-8")).hexdigest())
+            target_dir.mkdir(parents=False, exist_ok=True)
+            subprocess.run([bpy.app.binary_path, '-b', '-P', __file__, path], env={'HELIO_DIR': helio_dir, 'SOURCE_DIR': directory, 'TARGET_DIR': target_dir, 'SKIP_LIBRARIES': "true", 'ADDON_DEBUG': os.getenv('ADDON_DEBUG')})
+
+        for lib in bpy.data.libraries:
+            # reload only after all have been processed
+            lib.reload()
 
     for idx, objects in enumerate([
         bpy.data.libraries,
@@ -109,16 +127,12 @@ def load_post(filepath):
         bpy.data.volumes,
         bpy.data.cache_files
     ]):
-        for src, dest, copied in relocate_files(all_paths, helio_dir, objects):
+        for src, dest, copied in relocate_files(all_paths, helio_dir, source_dir, objects):
             if copied:
                 log.info("%s copied %s to %s", idx, src, dest)
             else:
                 log.info("%s did not copy: %s (%s)", idx, src, dest)
 
-    if os.getenv("SKIP_LIBRARIES") != "true":
-        for lib in bpy.data.libraries:
-            subprocess.run([bpy.app.binary_path, '-b', '-P', __file__, lib.filepath], env={'HELIO_DIR': helio_dir, 'SKIP_LIBRARIES': "true", 'ADDON_DEBUG': os.getenv('ADDON_DEBUG')})
-            sys.exit(1)
 
     print('remaining >>>', all_paths)
 
