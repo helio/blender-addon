@@ -181,7 +181,7 @@ class RenderOnHelio(bpy.types.Operator):
             name = Path(path).name
             directory = Path(path).parent
             new_dir = Path(helio_dir, sha256(str(directory).encode("utf-8")).hexdigest())
-            subprocess.run([bpy.app.binary_path, '-b', '-P', os.path.join(os.path.dirname(__file__), "blend_relocater.py", new_dir.joinpath(name))], env={'HELIO_DIR': helio_dir})
+            subprocess.run([bpy.app.binary_path, '-b', '-P', os.path.join(os.path.dirname(__file__), "blend_relocater.py", new_dir.joinpath(name))], env={'HELIO_DIR': helio_dir, 'ADDON_DEBUG': os.getenv('ADDON_DEBUG')})
             progress_message = f"Relinked {Path(param).name}"
         elif action == 'relink':
             bpy.ops.file.find_missing_files(find_all=True, directory=param)
@@ -391,7 +391,8 @@ class RenderOnHelio(bpy.types.Operator):
             "path": project_filepath,
         })
 
-        self._steps.append(('open_client', qs))
+        # TODO(mw): add again
+        # self._steps.append(('open_client', qs))
 
         self._total_steps = len(self._steps)
         self._current_step = 0

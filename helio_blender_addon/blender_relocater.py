@@ -22,6 +22,7 @@ from pathlib import Path
 from hashlib import sha256
 import os
 import sys
+from bpy.app.handlers import persistent
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO,
@@ -30,12 +31,14 @@ if os.getenv("ADDON_DEBUG"):
     log.setLevel(logging.DEBUG)
     log.debug("debug log enabled")
 
-paths = bpy.utils.blend_paths(absolute=True, packed=True, local=False)
-log.debug("all paths: %s", paths)
-
 helio_dir = os.getenv('HELIO_DIR')
 
-directory = Path(bpy.data.filepath).parent
-bpy.ops.file.find_missing_files(find_all=True, directory=helio_dir)
-bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, relative_remap=True, compress=True)
-bpy.ops.wm.quit_blender()
+@persistent
+def load_post(file):
+    log.debug("load post %s", file)
+
+    paths = bpy.utils.blend_paths(absolute=True, packed=True, local=False)
+    log.debug("all paths: %s", paths)
+
+    bpy.ops.file.find_missing_files(find_all=True, directory=helio_dir)
+    bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, relative_remap=True, compress=True)
