@@ -15,7 +15,10 @@
 #  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #
 # ##### END GPL LICENSE BLOCK #####
-import blender_asset_tracer.pack.transfer
+import tempfile
+
+from helio_blender_addon.blender_asset_tracer.blender_asset_tracer import pack
+from helio_blender_addon.blender_asset_tracer.blender_asset_tracer.pack.transfer import FileTransferError
 import bpy
 import bpy.utils.previews
 import os
@@ -25,14 +28,10 @@ import json
 import logging
 from urllib.parse import urlencode
 from pathlib import Path, PurePath
-from hashlib import sha256
-from distutils.file_util import copy_file
-from distutils.errors import DistutilsFileError
 
 import typing
 
 from helio_blender_addon import addon_updater_ops
-from helio_blender_addon import dependencies
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO,
@@ -136,10 +135,11 @@ class RenderOnHelio(bpy.types.Operator):
     bl_label = "Render On Helio"  # Display name in the interface.
     bl_options = {'REGISTER', 'UNDO'}  # Enable undo for the operator.
 
+    target_directory = None
+
     _steps = []
     _current_step = None
     _total_steps = None
-    _total = 0
     _timer = None
     _timer_count = 0
     _log = None
@@ -147,51 +147,41 @@ class RenderOnHelio(bpy.types.Operator):
     def update_progress(self, context, value, status):
         log.debug("update progress %d %s", value, status)
         helio_progress = context.scene.helio_progress
-        helio_progress.value = value
         helio_progress.status_value = status
 
     def check(self, context):
         return True
 
-    def target_dir(self, context):
-        directory = Path(bpy.data.filepath).parent
-        return Path(directory, "_helio")
-
     def process_step(self, context):
-        helio_dir = self.target_dir(context)
+        helio_dir = self.target_directory
 
         action, param = self._steps[self._current_step]
         log.debug("current step %d (%s, %s)", self._current_step, action, param)
         progress_message = ""
+        if action == 'packer_init':
+            progress_message = "Starting packing (no progress report during this time)"
         if action == 'packer':
-            filename = Path(param).name
             directory = Path(param).parent
-
-            from blender_asset_tracer import pack
-
-            self._total = 0
 
             class ProgressCallback(pack.progress.Callback):
                 def trace_asset(pself, filename: Path) -> None:
-                    self._total += 1
-
-                def trace_blendfile(pself, filename: Path) -> None:
-                    self.update_progress(context, self._current_step / self._total_steps * 100, f"Copied {filename}")
+                    self._log.info("adding file %s", filename)
 
                 def transfer_file(pself, src: Path, dst: Path) -> None:
-                    self.update_progress(context, self._current_step / self._total_steps * 100, f"Copying {src}")
+                    self._log.info("transferring file %s to %s", src, dst)
 
                 def pack_done(pself, output_blendfile: PurePath, missing_files: typing.Set[Path]):
-                    self.update_progress(context, 100.0, f"Packing done")
+                    self._log.info("packing done")
 
             packer = pack.Packer(bpy.data.filepath, directory, str(helio_dir), compress=True)
             packer.progress_cb = ProgressCallback()
             packer.strategise()
             try:
                 packer.execute()
-            except blender_asset_tracer.pack.transfer.FileTransferError as ex:
+            except FileTransferError as ex:
                 self._log.info(f"{len(ex.files_remaining)} files couldn't be copied, starting with {ex.files_remaining[0]}")
                 raise ex
+            progress_message = "Packing done"
         elif action == 'open_client':
             protocol = "helio-render"
             prefs = addon_updater_ops.get_user_preferences(context)
@@ -235,6 +225,8 @@ class RenderOnHelio(bpy.types.Operator):
         return {'PASS_THROUGH'}
 
     def invoke(self, context, event):
+        log.debug("target directory: %s", self.target_directory)
+
         self.update_progress(context, 0, "")
         self._steps = []
         bpy.ops.helio.render_modal('INVOKE_DEFAULT')
@@ -245,8 +237,7 @@ class RenderOnHelio(bpy.types.Operator):
             return {'FINISHED'}
 
         filename = Path(bpy.data.filepath).name
-        directory = Path(bpy.data.filepath).parent
-        helio_dir = Path(directory, "_helio")
+        helio_dir = Path(self.target_directory)
         project_path = str(helio_dir)
         project_name = filename
         project_filepath = str(helio_dir.joinpath(project_name))
@@ -405,20 +396,41 @@ class ModalOperator(bpy.types.Operator):
         return {'PASS_THROUGH'}
 
 
+class TargetDirectoryOperator(bpy.types.Operator):
+    bl_idname = "helio.target_directory"
+    bl_label = "Render On Helio"
+    bl_description = "Select target directory where archive should be placed"
+
+    directory = bpy.props.StringProperty(subtype="DIR_PATH", options={'HIDDEN'})
+    use_filter_folder = True
+    title = "Select target directory for archive"
+
+    def execute(self, context):
+        log.debug("#################", self.directory)
+        RenderOnHelio.target_directory = self.directory
+        bpy.ops.helio.render('INVOKE_DEFAULT')
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        if not bpy.data.is_saved:
+            raise Exception("current blender file must be saved before calling Render on Helio")
+        self.directory = tempfile.gettempdir()
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+
 def menu_func(self, context):
     global custom_icons
     self.layout.separator()
-    self.layout.operator(RenderOnHelio.bl_idname, icon_value=custom_icons["helio_icon"].icon_id)
+    self.layout.operator(TargetDirectoryOperator.bl_idname, icon_value=custom_icons["helio_icon"].icon_id)
 
 
-classes = [Preferences, RenderOnHelio, HelioProgress, ModalOperator]
+classes = [Preferences, RenderOnHelio, HelioProgress, ModalOperator, TargetDirectoryOperator]
 
 custom_icons = None
 
 
 def register():
-    dependencies.install()
-
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.types.TOPBAR_MT_render.append(menu_func)  # Adds the new operator to an existing menu.
