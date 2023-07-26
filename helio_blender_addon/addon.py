@@ -15,19 +15,22 @@
 #  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #
 # ##### END GPL LICENSE BLOCK #####
+import json
+import logging
+import os
+import subprocess
+import sys
+import tempfile
+import typing
+from pathlib import Path, PurePath
+from threading import Thread
+from urllib.parse import urlencode
 
 import bpy
 import bpy.utils.previews
-import os
-import sys
-import subprocess
-import json
-import logging
-from urllib.parse import urlencode
-from pathlib import Path
-from hashlib import sha256
-from distutils.file_util import copy_file
-from distutils.errors import DistutilsFileError
+from blender_asset_tracer.pack.transfer import FileTransferError
+
+from blender_asset_tracer import pack
 from helio_blender_addon import addon_updater_ops
 
 log = logging.getLogger(__name__)
@@ -43,9 +46,9 @@ def startfile(path):
     """
     Cross-platform start file for opening helio client.
     """
-    if sys.platform=='win32':
+    if sys.platform == 'win32':
         os.startfile(path)
-    elif sys.platform=='darwin':
+    elif sys.platform == 'darwin':
         subprocess.run(["open", path])
     else:
         subprocess.run(["xdg-open", path])
@@ -114,6 +117,9 @@ class Preferences(bpy.types.AddonPreferences):
 class HelioProgress(bpy.types.PropertyGroup):
     value: bpy.props.FloatProperty(name="Progress Value", options={'HIDDEN'})
     status_value: bpy.props.StringProperty(name="Status Value", options={'HIDDEN'})
+    copy_value: bpy.props.FloatProperty(name="Copy progress", options={'HIDDEN'})
+    show_copy_progress: bpy.props.BoolProperty(name="Show copy progress", default=False, options={'HIDDEN'})
+    copy_progress_filename: bpy.props.StringProperty(options={'HIDDEN'})
 
     def get_progress(self):
         return self.value
@@ -121,15 +127,24 @@ class HelioProgress(bpy.types.PropertyGroup):
     def get_progress_status(self):
         return self.status_value
 
-    progress: bpy.props.FloatProperty( name="Progress", subtype="PERCENTAGE", soft_min=0, soft_max=100, precision=1, get=get_progress)
+    def get_copy_progress(self):
+        return self.copy_value
+
+    progress: bpy.props.FloatProperty(name="Progress", subtype="PERCENTAGE", soft_min=0, soft_max=100, precision=1,
+                                      get=get_progress)
     progress_status: bpy.props.StringProperty(name="Status", get=get_progress_status)
+    copy_progress: bpy.props.FloatProperty(name="Copy Progress", subtype="PERCENTAGE", soft_min=0, soft_max=100,
+                                           precision=1,
+                                           get=get_copy_progress, options={'HIDDEN'})
 
 
 class RenderOnHelio(bpy.types.Operator):
-    """Render on Helio"""      # Use this as a tooltip for menu items and buttons.
-    bl_idname = "helio.render"        # Unique identifier for buttons and menu items to reference.
-    bl_label = "Render On Helio"         # Display name in the interface.
+    """Render on Helio"""  # Use this as a tooltip for menu items and buttons.
+    bl_idname = "helio.render"  # Unique identifier for buttons and menu items to reference.
+    bl_label = "Render On Helio"  # Display name in the interface.
     bl_options = {'REGISTER', 'UNDO'}  # Enable undo for the operator.
+
+    target_directory = None
 
     _steps = []
     _current_step = None
@@ -137,6 +152,8 @@ class RenderOnHelio(bpy.types.Operator):
     _timer = None
     _timer_count = 0
     _log = None
+    _thread = None
+    _packer = None
 
     def update_progress(self, context, value, status):
         log.debug("update progress %d %s", value, status)
@@ -147,48 +164,74 @@ class RenderOnHelio(bpy.types.Operator):
     def check(self, context):
         return True
 
-    def target_dir(self, context):
-        directory = Path(bpy.data.filepath).parent
-        return Path(directory, "_helio")
+    def execute_packer(self):
+        self._packer.strategise()
+        try:
+            self._packer.execute()
+        except FileTransferError as ex:
+            self._log.info(f"{len(ex.files_remaining)} files couldn't be copied, starting with {ex.files_remaining[0]}")
+            raise ex
+
+    class ProgressCallback(pack.progress.Callback):
+        def __init__(self, log: logging.Logger, helio_progress: HelioProgress, area: bpy.types.Area):
+            self._log = log
+            self._helio_progress = helio_progress
+            self._current_file = ""
+            self._total_files = 2 # pack-info and the main blender file
+            self._current_file_num = 0
+            self._area = area
+
+        def trace_asset(self, filename: Path) -> None:
+            self._helio_progress.show_copy_progress = True
+            self._total_files += 1
+            self._log.info("adding file %s", filename)
+
+        def transfer_file(self, src: Path, dst: Path) -> None:
+            self._log.info("transferring file %s to %s", src, dst)
+            self._current_file = src.name
+            self._current_file_num += 1
+            self._helio_progress.copy_progress_filename = self._current_file
+            self._helio_progress.copy_value = self._current_file_num / self._total_files * 100
+            self._area.tag_redraw()
+
+        def pack_done(
+            self,
+            output_blendfile: PurePath,
+            missing_files: typing.Set[Path],
+        ) -> None:
+            self._helio_progress.show_copy_progress = False
+            self._log.info("packing done")
+
+        def transfer_file_skipped(self, src: Path, dst: PurePath) -> None:
+            self._log.info("skipping file %s (already exists)", src)
+
+        def missing_file(self, filename: Path) -> None:
+            self._log.info("missing file %s", filename)
 
     def process_step(self, context):
-        helio_dir = self.target_dir(context)
+        helio_dir = self.target_directory
 
         action, param = self._steps[self._current_step]
         log.debug("current step %d (%s, %s)", self._current_step, action, param)
         progress_message = ""
-        if action == 'copy':
-            path = param
-            name = Path(path).name
-            directory = Path(path).parent
-            new_dir = Path(helio_dir, sha256(str(directory).encode("utf-8")).hexdigest())
-            new_dir.mkdir(parents=False, exist_ok=True)
-            try:
-                dest, copied = copy_file(path, str(new_dir), update=True)
-                progress_message = f"Copied {name}"
-                if copied:
-                    self._log.info("copied %s to %s", path, dest)
-                else:
-                    self._log.info("did not copy, not newer: %s", path)
+        advance_step = True
+        if action == 'packer_init':
+            progress_message = "Starting packing (no progress report during this time)"
+        elif action == 'packer':
+            bpath = Path(param)
+            directory = bpath.parent
 
-            except DistutilsFileError as e:
-                log.error("error copying: %s (%s)", path, str(e))
-                self._log.error("error copying: %s (%s)", path, str(e))
-                self.report({'ERROR'}, f"file {name} not found")
-                progress_message = f"File {name} not found"
-        elif action == 'relink':
-            bpy.ops.file.find_missing_files(find_all=True, directory=param)
-            progress_message = "Relinked files"
-        elif action == 'resave':
-            bpy.ops.wm.save_as_mainfile(filepath=param, copy=True, relative_remap=True, compress=True)
-
-            # remove .blend1 files
-            for p in Path(param).parent.glob("*.blend1"):
-                log.debug("unlinking %s", str(p))
-                p.unlink()
-
-            # save current file again
-            progress_message = "Saved exported file"
+            self._packer = pack.Packer(bpath, directory, str(helio_dir), compress=True)
+            self._packer.progress_cb = self.ProgressCallback(self._log, context.scene.helio_progress, context.area)
+            self._thread = Thread(target=self.execute_packer)
+            self._thread.start()
+            progress_message = "Packing..."
+        elif action == 'packer_wait':
+            advance_step = not self._thread.is_alive()
+            if advance_step:
+                progress_message = "Packing done"
+            else:
+                progress_message = "Packing..."
         elif action == 'open_client':
             protocol = "helio-render"
             prefs = addon_updater_ops.get_user_preferences(context)
@@ -205,8 +248,9 @@ class RenderOnHelio(bpy.types.Operator):
         else:
             raise NotImplementedError(f"Not implemented step: ({action}, {param})")
 
-        self._current_step += 1
-        self.update_progress(context, self._current_step/self._total_steps*100, progress_message)
+        if advance_step:
+            self._current_step += 1
+        self.update_progress(context, self._current_step / self._total_steps * 100, progress_message)
         context.area.tag_redraw()
 
     def done(self):
@@ -217,7 +261,7 @@ class RenderOnHelio(bpy.types.Operator):
             return {'PASS_THROUGH'}
 
         self._timer_count += 1
-        if self._timer_count == 2:
+        if self._timer_count == 10:
             self._timer_count = 0
 
             self.process_step(context)
@@ -232,6 +276,8 @@ class RenderOnHelio(bpy.types.Operator):
         return {'PASS_THROUGH'}
 
     def invoke(self, context, event):
+        log.debug("target directory: %s", self.target_directory)
+
         self.update_progress(context, 0, "")
         self._steps = []
         bpy.ops.helio.render_modal('INVOKE_DEFAULT')
@@ -242,8 +288,7 @@ class RenderOnHelio(bpy.types.Operator):
             return {'FINISHED'}
 
         filename = Path(bpy.data.filepath).name
-        directory = Path(bpy.data.filepath).parent
-        helio_dir = Path(directory, "_helio")
+        helio_dir = Path(self.target_directory)
         project_path = str(helio_dir)
         project_name = filename
         project_filepath = str(helio_dir.joinpath(project_name))
@@ -264,20 +309,9 @@ class RenderOnHelio(bpy.types.Operator):
 
         log.debug("created directory %s", helio_dir)
 
-        paths = bpy.utils.blend_paths(absolute=True, packed=True, local=False)
-        log.debug("all paths: %s", paths)
-
-        for path in paths:
-            if '<UDIM>' in path:
-                print(path, Path(path).parent)
-                tp = Path(path)
-                for p in tp.parent.glob(tp.name.replace('<UDIM>', '*')):
-                    self._steps.append(('copy', str(p)))
-            else:
-                self._steps.append(('copy', path))
-
-        self._steps.append(('relink', project_path))
-        self._steps.append(('resave', project_filepath))
+        self._steps.append(('packer_init', bpy.data.filepath))
+        self._steps.append(('packer', bpy.data.filepath))
+        self._steps.append(('packer_wait', bpy.data.filepath))
 
         # https://docs.blender.org/api/current/bpy.types.Scene.html#bpy.types.Scene
         scene = context.scene
@@ -310,7 +344,7 @@ class RenderOnHelio(bpy.types.Operator):
         if engine == 'BLENDER_EEVEE':
             if bpy.app.version < (3, 6, 0):
                 raise NotImplementedError("EEVEE support is limited to blender versions >= 3.6.0")
-            engine_id = 'eevee_gpu_optix' # eevee only this is possible
+            engine_id = 'eevee_gpu_optix'  # eevee only this is possible
         else:
             device = cycles.device
             if device == 'GPU':
@@ -402,6 +436,8 @@ class ModalOperator(bpy.types.Operator):
         layout = self.layout
 
         layout.prop(helio_progress, "progress")
+        if helio_progress.show_copy_progress:
+            layout.prop(helio_progress, "copy_progress", text=helio_progress.copy_progress_filename)
         layout.prop(helio_progress, "progress_status")
 
     def check(self, context):
@@ -415,13 +451,62 @@ class ModalOperator(bpy.types.Operator):
         return {'PASS_THROUGH'}
 
 
+class TargetDirectoryOperator(bpy.types.Operator):
+    bl_idname = "helio.target_directory"
+    bl_label = "Select"
+    bl_description = "Select target directory where archive should be placed"
+    bl_options = {'REGISTER', 'INTERNAL'}
+
+    directory: bpy.props.StringProperty(subtype="DIR_PATH", options={'HIDDEN'})
+    filter_folder: bpy.props.BoolProperty(default=True, options={'HIDDEN', 'SKIP_SAVE'})
+    title = bpy.props.StringProperty()
+
+    def execute(self, context):
+        RenderOnHelio.target_directory = self.directory
+        bpy.ops.helio.render('INVOKE_DEFAULT')
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        if event.type == 'ESC':
+            return {'CANCELLED'}
+        self.title = 'Select target directory for archive'
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+
+class TargetDirectoryPromptOperator(bpy.types.Operator):
+    bl_idname = "helio.target_directory_prompt"
+    bl_label = "Render On Helio..."
+    bl_description = "Select target directory where archive should be placed"
+    bl_options = {'REGISTER'}
+
+    @classmethod
+    def poll(cls, context):
+        return True
+
+    def execute(self, context):
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        if not bpy.data.is_saved:
+            raise Exception("current blender file must be saved before calling Render on Helio")
+        return context.window_manager.invoke_popup(self)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text=self.bl_description)
+        layout.operator_context = 'INVOKE_DEFAULT'
+        layout.operator(TargetDirectoryOperator.bl_idname, icon="FILEBROWSER", text="Choose target directory...")
+
+
 def menu_func(self, context):
     global custom_icons
     self.layout.separator()
-    self.layout.operator(RenderOnHelio.bl_idname, icon_value=custom_icons["helio_icon"].icon_id)
+    self.layout.operator(TargetDirectoryPromptOperator.bl_idname, icon_value=custom_icons["helio_icon"].icon_id)
 
 
-classes = [Preferences, RenderOnHelio, HelioProgress, ModalOperator]
+classes = [Preferences, RenderOnHelio, HelioProgress, ModalOperator, TargetDirectoryOperator,
+           TargetDirectoryPromptOperator]
 
 custom_icons = None
 

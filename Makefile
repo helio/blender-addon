@@ -44,6 +44,6 @@ run: ## Runs blender with addon
 
 release:
 	rm helio-blender-addon-$(TAG).zip || true
-	rm -Rf helio_blender_addon/__pycache__
-	rm -Rf helio_blender_addon/*.pyc
+	find helio_blender_addon -iname '__pycache__' -exec rm -Rf {} \;
+	find helio_blender_addon -iname '*.pyc' -exec rm {} \;
 	zip -r helio_blender_addon-$(TAG).zip helio_blender_addon/

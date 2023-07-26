@@ -15,6 +15,12 @@
 #  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #
 # ##### END GPL LICENSE BLOCK #####
+import sys
+from pathlib import Path
+# because python module is only in blender_asset_tracer/blender_asset_tracer (and we can't
+# use pip because of elevated sys permissions needed), add the parent dir to the import path,
+# so we can `import blender_asset_tracer` instead of `import blender_asset_tracer.blender_asset_tracer`
+sys.path.append(str(Path(__file__).parent.joinpath('blender_asset_tracer')))
 
 from helio_blender_addon import addon_updater_ops
 from helio_blender_addon import addon
