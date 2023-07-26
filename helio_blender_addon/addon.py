@@ -15,22 +15,21 @@
 #  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #
 # ##### END GPL LICENSE BLOCK #####
-import tempfile
-
-from helio_blender_addon.blender_asset_tracer.blender_asset_tracer import pack
-from helio_blender_addon.blender_asset_tracer.blender_asset_tracer.pack.transfer import FileTransferError
-import bpy
-import bpy.utils.previews
-import os
-import sys
-import subprocess
 import json
 import logging
-from urllib.parse import urlencode
-from pathlib import Path, PurePath
-
+import os
+import subprocess
+import sys
+import tempfile
 import typing
+from pathlib import Path, PurePath
+from urllib.parse import urlencode
 
+import bpy
+import bpy.utils.previews
+from blender_asset_tracer.pack.transfer import FileTransferError
+
+from blender_asset_tracer import pack
 from helio_blender_addon import addon_updater_ops
 
 log = logging.getLogger(__name__)
@@ -160,8 +159,9 @@ class RenderOnHelio(bpy.types.Operator):
         progress_message = ""
         if action == 'packer_init':
             progress_message = "Starting packing (no progress report during this time)"
-        if action == 'packer':
-            directory = Path(param).parent
+        elif action == 'packer':
+            bpath = Path(param)
+            directory = bpath.parent
 
             class ProgressCallback(pack.progress.Callback):
                 def trace_asset(pself, filename: Path) -> None:
@@ -173,7 +173,7 @@ class RenderOnHelio(bpy.types.Operator):
                 def pack_done(pself, output_blendfile: PurePath, missing_files: typing.Set[Path]):
                     self._log.info("packing done")
 
-            packer = pack.Packer(bpy.data.filepath, directory, str(helio_dir), compress=True)
+            packer = pack.Packer(bpath, directory, str(helio_dir), compress=True)
             packer.progress_cb = ProgressCallback()
             packer.strategise()
             try:
@@ -210,7 +210,7 @@ class RenderOnHelio(bpy.types.Operator):
             return {'PASS_THROUGH'}
 
         self._timer_count += 1
-        if self._timer_count == 2:
+        if self._timer_count == 10:
             self._timer_count = 0
 
             self.process_step(context)
@@ -258,6 +258,7 @@ class RenderOnHelio(bpy.types.Operator):
 
         log.debug("created directory %s", helio_dir)
 
+        self._steps.append(('packer_init', bpy.data.filepath))
         self._steps.append(('packer', bpy.data.filepath))
 
         # https://docs.blender.org/api/current/bpy.types.Scene.html#bpy.types.Scene
@@ -398,34 +399,60 @@ class ModalOperator(bpy.types.Operator):
 
 class TargetDirectoryOperator(bpy.types.Operator):
     bl_idname = "helio.target_directory"
-    bl_label = "Render On Helio"
+    bl_label = "Select"
     bl_description = "Select target directory where archive should be placed"
+    bl_options = {'REGISTER', 'INTERNAL'}
 
-    directory = bpy.props.StringProperty(subtype="DIR_PATH", options={'HIDDEN'})
-    use_filter_folder = True
-    title = "Select target directory for archive"
+    directory: bpy.props.StringProperty(subtype="DIR_PATH", options={'HIDDEN'})
+    filter_folder: bpy.props.BoolProperty(default=True, options={'HIDDEN', 'SKIP_SAVE'})
+    title = bpy.props.StringProperty()
 
     def execute(self, context):
-        log.debug("#################", self.directory)
+        print("#################", self.directory)
         RenderOnHelio.target_directory = self.directory
         bpy.ops.helio.render('INVOKE_DEFAULT')
         return {'FINISHED'}
 
     def invoke(self, context, event):
-        if not bpy.data.is_saved:
-            raise Exception("current blender file must be saved before calling Render on Helio")
-        self.directory = tempfile.gettempdir()
+        if event.type == 'ESC':
+            return {'CANCELLED'}
+        self.title = 'Select target directory for archive'
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
+
+
+class TargetDirectoryPromptOperator(bpy.types.Operator):
+    bl_idname = "helio.target_directory_prompt"
+    bl_label = "Render On Helio..."
+    bl_description = "Select target directory where archive should be placed"
+    bl_options = {'REGISTER'}
+
+    @classmethod
+    def poll(cls, context):
+        return True
+
+    def execute(self, context):
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        if not bpy.data.is_saved:
+            raise Exception("current blender file must be saved before calling Render on Helio")
+        return context.window_manager.invoke_popup(self)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text=self.bl_description)
+        layout.operator_context = 'INVOKE_DEFAULT'
+        layout.operator(TargetDirectoryOperator.bl_idname, icon="FILEBROWSER", text="Choose target directory...")
 
 
 def menu_func(self, context):
     global custom_icons
     self.layout.separator()
-    self.layout.operator(TargetDirectoryOperator.bl_idname, icon_value=custom_icons["helio_icon"].icon_id)
+    self.layout.operator(TargetDirectoryPromptOperator.bl_idname, icon_value=custom_icons["helio_icon"].icon_id)
 
 
-classes = [Preferences, RenderOnHelio, HelioProgress, ModalOperator, TargetDirectoryOperator]
+classes = [Preferences, RenderOnHelio, HelioProgress, ModalOperator, TargetDirectoryOperator, TargetDirectoryPromptOperator]
 
 custom_icons = None
 
