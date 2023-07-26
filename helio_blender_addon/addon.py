@@ -165,6 +165,7 @@ class RenderOnHelio(bpy.types.Operator):
         return True
 
     def execute_packer(self):
+        self._packer.strategise()
         try:
             self._packer.execute()
         except FileTransferError as ex:
@@ -172,21 +173,26 @@ class RenderOnHelio(bpy.types.Operator):
             raise ex
 
     class ProgressCallback(pack.progress.Callback):
-        _current_file = ""
-        _log = None
-        _helio_progress = None
-
-        def __init__(self, log: logging.Logger, helio_progress: HelioProgress):
+        def __init__(self, log: logging.Logger, helio_progress: HelioProgress, area: bpy.types.Area):
             self._log = log
             self._helio_progress = helio_progress
+            self._current_file = ""
+            self._total_files = 2 # pack-info and the main blender file
+            self._current_file_num = 0
+            self._area = area
 
         def trace_asset(self, filename: Path) -> None:
             self._helio_progress.show_copy_progress = True
+            self._total_files += 1
             self._log.info("adding file %s", filename)
 
         def transfer_file(self, src: Path, dst: Path) -> None:
             self._log.info("transferring file %s to %s", src, dst)
             self._current_file = src.name
+            self._current_file_num += 1
+            self._helio_progress.copy_progress_filename = self._current_file
+            self._helio_progress.copy_value = self._current_file_num / self._total_files * 100
+            self._area.tag_redraw()
 
         def pack_done(
             self,
@@ -202,10 +208,6 @@ class RenderOnHelio(bpy.types.Operator):
         def missing_file(self, filename: Path) -> None:
             self._log.info("missing file %s", filename)
 
-        def transfer_progress(self, total_bytes: int, transferred_bytes: int) -> None:
-            self._helio_progress.copy_progress_filename = self._current_file
-            self._helio_progress.copy_value = transferred_bytes / total_bytes * 100
-
     def process_step(self, context):
         helio_dir = self.target_directory
 
@@ -220,11 +222,10 @@ class RenderOnHelio(bpy.types.Operator):
             directory = bpath.parent
 
             self._packer = pack.Packer(bpath, directory, str(helio_dir), compress=True)
-            self._packer.progress_cb = self.ProgressCallback(self._log, context.scene.helio_progress)
-            self._packer.strategise()
+            self._packer.progress_cb = self.ProgressCallback(self._log, context.scene.helio_progress, context.area)
             self._thread = Thread(target=self.execute_packer)
             self._thread.start()
-            progress_message = "Starting packing..."
+            progress_message = "Packing..."
         elif action == 'packer_wait':
             advance_step = not self._thread.is_alive()
             if advance_step:
@@ -249,7 +250,7 @@ class RenderOnHelio(bpy.types.Operator):
 
         if advance_step:
             self._current_step += 1
-            self.update_progress(context, self._current_step / self._total_steps * 100, progress_message)
+        self.update_progress(context, self._current_step / self._total_steps * 100, progress_message)
         context.area.tag_redraw()
 
     def done(self):
@@ -260,7 +261,7 @@ class RenderOnHelio(bpy.types.Operator):
             return {'PASS_THROUGH'}
 
         self._timer_count += 1
-        if self._timer_count == 2:
+        if self._timer_count == 10:
             self._timer_count = 0
 
             self.process_step(context)
@@ -433,8 +434,6 @@ class ModalOperator(bpy.types.Operator):
     def draw(self, context):
         helio_progress = context.scene.helio_progress
         layout = self.layout
-
-        print("#####", helio_progress, helio_progress.show_copy_progress)
 
         layout.prop(helio_progress, "progress")
         if helio_progress.show_copy_progress:
