@@ -43,7 +43,7 @@ run: ## Runs blender with addon
 	rm -Rf $(USER_SCRIPTS_DIR)
 
 submodule:
-  git submodule update --init
+	git submodule update --init
 
 release: submodule
 	rm helio-blender-addon-$(TAG).zip || true
