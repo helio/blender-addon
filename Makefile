@@ -42,7 +42,10 @@ run: ## Runs blender with addon
 	BLENDER_USER_SCRIPTS=$(USER_SCRIPTS_DIR) ADDON_DEBUG=true $(BLENDER_PATH) --addons helio_blender_addon
 	rm -Rf $(USER_SCRIPTS_DIR)
 
-release:
+submodule:
+  git submodule update --init
+
+release: submodule
 	rm helio-blender-addon-$(TAG).zip || true
 	find helio_blender_addon -iname '__pycache__' -exec rm -Rf {} \;
 	find helio_blender_addon -iname '*.pyc' -exec rm {} \;
