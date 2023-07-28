@@ -360,6 +360,26 @@ class RenderOnHelio(bpy.types.Operator):
 
         major, minor, patch = bpy.app.version
         full_version = '.'.join(map(str, bpy.app.version))
+
+        output = {
+            "common": {
+                "enabled": True,
+                "final": render.frame_path(),
+                "project": render.filepath,
+                "extension": render.image_settings.file_format.lower()
+            }
+        }
+        tree = scene.node_tree
+        if tree is not None:
+            for node in tree.nodes:
+                if node.bl_idname == 'CompositorNodeOutputFile':
+                    output[bpy.path.clean_name(node.name)] = {
+                        "enabled": True,
+                        "final": node.base_path,
+                        "project": render.filepath,
+                        "extension": node.format.file_format.lower()
+                    }
+
         data = {
             "version": "1.0.0",
             "addon_version": '.'.join(map(str, addon_updater_ops.updater.current_version)),
@@ -390,14 +410,7 @@ class RenderOnHelio(bpy.types.Operator):
                         "ration": 1
                     },
                     "frames": f"{frame_start}-{frame_end}",
-                    "output": {
-                        "common": {
-                            "enabled": True,
-                            "final": render.frame_path(),
-                            "project": render.filepath,
-                            "extension": render.image_settings.file_format.lower()
-                        }
-                    },
+                    "output": output,
                     "render_settings": render_settings,
                 }
             ]

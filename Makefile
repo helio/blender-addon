@@ -35,7 +35,7 @@ PWD=$(shell pwd)
 USER_SCRIPTS_DIR=$(PWD)/user_scripts
 
 .PHONY: run
-run: ## Runs blender with addon
+run: submodule ## Runs blender with addon
 	rm -Rf  $(USER_SCRIPTS_DIR) || true
 	mkdir -p $(USER_SCRIPTS_DIR)/addons
 	ln -s $(PWD)/helio_blender_addon $(USER_SCRIPTS_DIR)/addons/
