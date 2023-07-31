@@ -144,6 +144,28 @@ class RenderOnHelio(bpy.types.Operator):
     bl_label = "Render On Helio"  # Display name in the interface.
     bl_options = {'REGISTER', 'UNDO'}  # Enable undo for the operator.
 
+
+    _extension_from_format = {
+        "BMP": ".bmp",
+        "IRIS": ".rgb",
+        "IRIZ": ".rgb",
+        "PNG": ".png",
+        "JPEG": ".jpg",
+        "JPEG2000": ".jpg2",
+        "TARGA": ".tga",
+        "TARGA_RAW": ".tga",
+        "CINEON": ".cin",
+        "DPX": ".dpx",
+        "OPEN_EXR_MULTILAYER": ".exr",
+        "OPEN_EXR": ".exr",
+        "HDR": ".hdr",
+        "TIFF": ".tiff",
+        "WEBP": ".webp",
+        "AVI_JPEG": ".jpg",
+        "AVI_RAW": ".jpg",
+        "FFMPEG": ".png",
+    }
+
     target_directory = None
 
     _steps = []
@@ -360,6 +382,36 @@ class RenderOnHelio(bpy.types.Operator):
 
         major, minor, patch = bpy.app.version
         full_version = '.'.join(map(str, bpy.app.version))
+
+        scene = bpy.context.scene
+        render = bpy.context.scene.render
+
+        def final_name(path: Path, file_format: str) -> str:
+            if '#' not in path.name:
+                path = path.joinpath('####')
+            if path.suffix == '':
+                path = path.with_suffix(self._extension_from_format[file_format])
+            return str(path)
+
+        output = {
+            "common": {
+                "enabled": True,
+                "final": final_name(Path(render.filepath), render.image_settings.file_format),
+                "project": os.path.dirname(render.filepath),
+                "extension": render.image_settings.file_format.lower()
+            }
+        }
+        tree = scene.node_tree
+        if tree is not None:
+            for node in tree.nodes:
+                if node.bl_idname == 'CompositorNodeOutputFile':
+                    output[bpy.path.clean_name(node.name)] = {
+                        "enabled": True,
+                        "final": final_name(Path(node.base_path), node.format.file_format),
+                        "project": os.path.dirname(node.base_path),
+                        "extension": node.format.file_format.lower()
+                    }
+
         data = {
             "version": "1.0.0",
             "addon_version": '.'.join(map(str, addon_updater_ops.updater.current_version)),
@@ -390,14 +442,7 @@ class RenderOnHelio(bpy.types.Operator):
                         "ration": 1
                     },
                     "frames": f"{frame_start}-{frame_end}",
-                    "output": {
-                        "common": {
-                            "enabled": True,
-                            "final": render.frame_path(),
-                            "project": render.filepath,
-                            "extension": render.image_settings.file_format.lower()
-                        }
-                    },
+                    "output": output,
                     "render_settings": render_settings,
                 }
             ]
