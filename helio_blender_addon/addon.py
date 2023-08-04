@@ -393,11 +393,12 @@ class RenderOnHelio(bpy.types.Operator):
                 path = path.with_suffix(self._extension_from_format[file_format])
             return str(path)
 
+        render_filepath = str(Path(bpy.path.abspath(render.filepath)).resolve())
         output = {
             "common": {
                 "enabled": True,
-                "final": final_name(Path(render.filepath), render.image_settings.file_format),
-                "project": os.path.dirname(render.filepath),
+                "final": final_name(Path(render_filepath), render.image_settings.file_format),
+                "project": os.path.dirname(render_filepath),
                 "extension": render.image_settings.file_format.lower()
             }
         }
@@ -405,10 +406,11 @@ class RenderOnHelio(bpy.types.Operator):
         if tree is not None:
             for node in tree.nodes:
                 if node.bl_idname == 'CompositorNodeOutputFile':
+                    base_path = str(Path(bpy.path.abspath(node.base_path)).resolve())
                     output[bpy.path.clean_name(node.name)] = {
                         "enabled": True,
-                        "final": final_name(Path(node.base_path), node.format.file_format),
-                        "project": os.path.dirname(node.base_path),
+                        "final": final_name(Path(base_path), node.format.file_format),
+                        "project": os.path.dirname(base_path),
                         "extension": node.format.file_format.lower()
                     }
 
@@ -472,7 +474,7 @@ class RenderOnHelio(bpy.types.Operator):
 
 class ModalOperator(bpy.types.Operator):
     bl_idname = "helio.render_modal"
-    bl_label = "Helio Render Modal"
+    bl_label = "Render On Helio"
     bl_region_type = "UI"
     bl_options = {'REGISTER', 'INTERNAL'}
 
