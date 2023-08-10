@@ -18,4 +18,4 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
-          files: helio_blender_addon-*.zip
+          files: helio_blender_addon.zip

@@ -46,7 +46,7 @@ submodule:
 	git submodule update --init
 
 release: submodule
-	rm helio-blender-addon-$(TAG).zip || true
+	rm helio-blender-addon.zip || true
 	find helio_blender_addon -iname '__pycache__' -exec rm -Rf {} \;
 	find helio_blender_addon -iname '*.pyc' -exec rm {} \;
-	zip -r helio_blender_addon-$(TAG).zip helio_blender_addon/
+	zip -r helio_blender_addon.zip helio_blender_addon/
