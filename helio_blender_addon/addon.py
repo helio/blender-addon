@@ -257,7 +257,11 @@ class RenderOnHelio(bpy.types.Operator):
         elif action == 'open_client':
             protocol = "helio-render"
             prefs = addon_updater_ops.get_user_preferences(context)
-            release = prefs.client_target_release
+            try:
+                release = prefs.client_target_release
+            except AttributeError:
+                release = "ALPHA"
+
             if release == "BETA":
                 protocol += "-beta"
             elif release == "ALPHA":
